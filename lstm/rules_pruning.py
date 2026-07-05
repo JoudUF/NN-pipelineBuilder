@@ -5,6 +5,8 @@ from lstm.facts import (
     EmbeddingParam, LSTMParam, GRUParam, RNNParam, LinearParam,
     Conv1dParam, Pool1dParam, AdaptivePool1dParam, AttentionParam,
     DropoutParam, ActivationParam, PermuteParam,
+    SelectHiddenParam, SelectCellParam, BmmParam, StackParam,
+    SplitParam, ReshapeParam,                                
     Mismatch, FixRecommendation,
 )
 
@@ -55,25 +57,25 @@ class PruningRules(KnowledgeEngine):
             insert_layer_type="reorder"
         ))
 
-    # PR5_DOUBLE_PACK: pack_sequence -> pack_sequence
+    # PR5_PACK_ALREADY_PACKED: pack_sequence receiving packed sequence
     @Rule(
         LayerNode(index=MATCH.i, layer_type="pack_sequence"),
-        LayerNode(index=MATCH.j, layer_type="pack_sequence"),
-        TEST(lambda i, j: j == i + 1),
-        NOT(Mismatch(layer_index=MATCH.j, mismatch_type="packed_protocol")),
+        LayerOutputShape(layer_index=MATCH.prev_i, format="packed"),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(Mismatch(layer_index=MATCH.i, mismatch_type="packed_protocol")),
         salience=100
     )
-    def pr5_double_pack(self, j):
+    def pr5_pack_already_packed(self, i):
         self.declare(Mismatch(
-            layer_index=j,
-            prev_index=j - 1,
+            layer_index=i,
+            prev_index=i - 1,
             mismatch_type="packed_protocol",
             description="Cannot pack an already packed sequence. "
                         "Double pack_padded_sequence detected.",
             severity="error"
         ))
         self.declare(FixRecommendation(
-            layer_index=j,
+            layer_index=i,
             fix_description="Remove the duplicate pack_padded_sequence.",
             insert_layer_type="remove"
         ))
@@ -630,3 +632,81 @@ class PruningRules(KnowledgeEngine):
                             "(e.g., 1, 2, 4, 8, ...).".format(edim),
             insert_layer_type="adjust"
         ))
+
+    # ==========================================================
+    # PR8: NEW LAYER MISMATCHES
+    # ==========================================================
+
+    # PR8_SELECT_HIDDEN_NOT_RNN: select_hidden must target an RNN
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="select_hidden"),
+        SelectHiddenParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        LayerNode(index=MATCH.src, layer_type=MATCH.src_type),
+        TEST(lambda src_type: src_type not in ("lstm", "gru", "rnn")),
+        NOT(Mismatch(layer_index=MATCH.i, mismatch_type="invalid_source")),
+        salience=90
+    )
+    def pr8_select_hidden_not_rnn(self, i, src, src_type):
+        self.declare(Mismatch(
+            layer_index=i,
+            prev_index=i - 1,
+            mismatch_type="invalid_source",
+            description="Select Hidden State requires a recurrent layer as source, "
+                        "but layer {} is '{}'.".format(src, src_type),
+            severity="error"
+        ))
+        self.declare(FixRecommendation(
+            layer_index=i,
+            fix_description="Change source_layer_index to point to an LSTM/GRU/RNN.",
+            insert_layer_type="adjust"
+        ))
+
+    # PR8_SELECT_CELL_NOT_LSTM: select_cell must target an LSTM
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="select_cell"),
+        SelectCellParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        LayerNode(index=MATCH.src, layer_type=MATCH.src_type),
+        TEST(lambda src_type: src_type != "lstm"),
+        NOT(Mismatch(layer_index=MATCH.i, mismatch_type="invalid_source")),
+        salience=90
+    )
+    def pr8_select_cell_not_lstm(self, i, src, src_type):
+        self.declare(Mismatch(
+            layer_index=i,
+            prev_index=i - 1,
+            mismatch_type="invalid_source",
+            description="Select Cell State requires an LSTM layer as source, "
+                        "but layer {} is '{}'.".format(src, src_type),
+            severity="error"
+        ))
+        self.declare(FixRecommendation(
+            layer_index=i,
+            fix_description="Change source_layer_index to point to an LSTM.",
+            insert_layer_type="adjust"
+        ))
+
+    # PR8_POOL_NOT_3D: mean_pool/max_pool_time needs 3D
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type=MATCH.pool_type),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=MATCH.dims),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        TEST(lambda pool_type: pool_type in ("mean_pool", "max_pool_time")),
+        TEST(lambda dims: dims != 3),
+        NOT(Mismatch(layer_index=MATCH.i, mismatch_type="dim_mismatch")),
+        salience=90
+    )
+    def pr8_pool_not_3d(self, i, pool_type, dims):
+        self.declare(Mismatch(
+            layer_index=i,
+            prev_index=i - 1,
+            mismatch_type="dim_mismatch",
+            description="'{}' requires a 3D sequential tensor, but previous "
+                        "layer output is {}D.".format(pool_type, dims),
+            severity="error"
+        ))
+        self.declare(FixRecommendation(
+            layer_index=i,
+            fix_description="Ensure the layer before pooling outputs a 3D sequence.",
+            insert_layer_type="reorder"
+        ))
+

@@ -6,7 +6,8 @@ from lstm.facts import (
     Conv1dParam, Pool1dParam, AdaptivePool1dParam, AttentionParam,
     DropoutParam, ActivationParam, PermuteParam, SqueezeParam,
     UnsqueezeParam, CatParam, ResidualParam,
-    LayerCode,
+    LayerCode, AutoUnpackCode,
+    SelectHiddenParam, SelectCellParam, BmmParam, StackParam, SplitParam, ReshapeParam,
 )
 
 
@@ -18,6 +19,23 @@ class CodeRules(KnowledgeEngine):
     LayerOutputShape (to auto-calculate in_features etc.), then declares
     a LayerCode fact with init_code and forward_code strings.
     """
+
+    # =====================================================
+    # CG_AUTO_UNPACK: Auto-unpack packed sequences for non-RNNs
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type=MATCH.ltype),
+        TEST(lambda ltype: ltype not in ("lstm", "gru", "rnn", "unpack_sequence", "pack_sequence")),
+        LayerOutputShape(layer_index=MATCH.prev_i, format="packed"),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(AutoUnpackCode(layer_index=MATCH.i)),
+        salience=100
+    )
+    def cg_auto_unpack(self, i):
+        self.declare(AutoUnpackCode(
+            layer_index=i,
+            code="x, _ = pad_packed_sequence(x, batch_first=False)"
+        ))
 
     # =====================================================
     # CG_EMBED: nn.Embedding
@@ -675,7 +693,7 @@ class CodeRules(KnowledgeEngine):
     def cg_softmax(self, i, d):
         self.declare(LayerCode(
             layer_index=i,
-            init_code="self.softmax_{} = nn.Softmax(dim={})".format(i, d),
+            init_code="self.softmax_{} = nn.Softmax(dim=-1)".format(i),
             forward_code="x = self.softmax_{}(x)".format(i)
         ))
 
@@ -690,6 +708,151 @@ class CodeRules(KnowledgeEngine):
     def cg_log_softmax(self, i, d):
         self.declare(LayerCode(
             layer_index=i,
-            init_code="self.log_softmax_{} = nn.LogSoftmax(dim={})".format(i, d),
+            init_code="self.log_softmax_{} = nn.LogSoftmax(dim=-1)".format(i),
             forward_code="x = self.log_softmax_{}(x)".format(i)
+        ))
+
+    # =====================================================
+    # NEW LAYERS
+    # =====================================================
+
+    # CG_SUM_DIRECTIONS: Sum Directions (fwd+bwd)
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="sum_directions"),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d2=MATCH.feat),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_sum_directions(self, i, feat):
+        half = feat // 2
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x = x[:, :, :{} ] + x[:, :, {} :]  # Sum directions".format(half, half)
+        ))
+
+    # CG_SPLIT_DIRECTIONS: Split Directions
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="split_directions"),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d0=MATCH.seq, d1=MATCH.batch, d2=MATCH.feat),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_split_directions(self, i, seq, batch, feat):
+        half = feat // 2
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x = x.view({}, {}, 2, {})  # Split directions".format(seq, batch, half)
+        ))
+
+    # CG_SELECT_HIDDEN: Select Hidden State (h_n)
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="select_hidden"),
+        SelectHiddenParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_select_hidden(self, i, src):
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x = h_{}[-1]  # Select hidden state from layer {}".format(src, src)
+        ))
+
+    # CG_SELECT_CELL: Select Cell State (c_n)
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="select_cell"),
+        SelectCellParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_select_cell(self, i, src):
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x = c_{}[-1]  # Select cell state from layer {}".format(src, src)
+        ))
+
+    # CG_MEAN_POOL: Mean Pool (over time)
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="mean_pool"),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_mean_pool(self, i):
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x = x.mean(dim=0)  # Mean pool over sequence"
+        ))
+
+    # CG_MAX_POOL_TIME: Max Pool (over time)
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="max_pool_time"),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_max_pool_time(self, i):
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x, _ = x.max(dim=0)  # Max pool over sequence"
+        ))
+
+    # CG_BMM: Batch Matmul
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="bmm"),
+        BmmParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_bmm(self, i, src):
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x = torch.bmm(x, out_{})  # Batch matmul with layer {}".format(src, src)
+        ))
+
+    # CG_STACK: torch.stack
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="stack"),
+        StackParam(layer_index=MATCH.i, source_layer_index=MATCH.src, dim=MATCH.d),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_stack(self, i, src, d):
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x = torch.stack([x, out_{}], dim={})  # Stack with layer {}".format(src, d, src)
+        ))
+
+    # CG_SPLIT: torch.split
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="split"),
+        SplitParam(layer_index=MATCH.i, split_size_or_sections=MATCH.sz, dim=MATCH.d),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_split(self, i, sz, d):
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x = torch.split(x, {}, dim={})[0]  # Split and take first chunk".format(sz, d)
+        ))
+
+    # CG_RESHAPE: torch.reshape / view
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="reshape"),
+        ReshapeParam(layer_index=MATCH.i, shape=MATCH.shape_str),
+        NOT(LayerCode(layer_index=MATCH.i)),
+        salience=0
+    )
+    def cg_reshape(self, i, shape_str):
+        self.declare(LayerCode(
+            layer_index=i,
+            init_code="",
+            forward_code="x = x.view({})  # Reshape".format(shape_str)
         ))

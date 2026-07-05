@@ -176,6 +176,24 @@ def build_gui():
     root.title("Deep Learning Expert System - Engineering Dashboard")
     root.geometry("900x800")
     
+    BG_DARK       = "#1a1a2e"
+    BG_PANEL      = "#16213e"
+    BG_CARD       = "#0f3460"
+    FG_PRIMARY    = "#e0e0e0"
+    FG_ACCENT     = "#00d4ff"
+    FG_SUCCESS    = "#00e676"
+
+    root.configure(bg=BG_DARK)
+
+    style = ttk.Style(root)
+    style.theme_use('clam')
+    
+    style.configure("TFrame", background=BG_DARK)
+    style.configure("TLabel", background=BG_DARK, foreground=FG_PRIMARY, font=("Consolas", 10))
+    style.configure("TNotebook", background=BG_DARK, borderwidth=0)
+    style.configure("TNotebook.Tab", background=BG_PANEL, foreground=FG_PRIMARY, font=("Consolas", 10, "bold"), padding=[10, 5])
+    style.map("TNotebook.Tab", background=[("selected", BG_CARD)], foreground=[("selected", FG_ACCENT)])
+
     # 1. Notebook for Tabs
     notebook = ttk.Notebook(root)
     notebook.pack(fill="x", padx=10, pady=10)
@@ -238,7 +256,7 @@ def build_gui():
         tab.columnconfigure(1, weight=1)
 
     # 2. Output Area
-    output_box = ScrolledText(root, height=22, wrap="word", font=("Consolas", 10), bg="#1e1e1e", fg="#00ff00")
+    output_box = ScrolledText(root, height=22, wrap="word", font=("Consolas", 10), bg=BG_PANEL, fg=FG_SUCCESS, insertbackground=FG_PRIMARY)
     output_box.pack(fill="both", expand=True, padx=10, pady=5)
 
     def on_run():

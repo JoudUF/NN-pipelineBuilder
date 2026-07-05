@@ -208,6 +208,56 @@ class ResidualParam(Fact):
     """
     pass
 
+class SelectHiddenParam(Fact):
+    """
+    Fields:
+        layer_index         : int
+        source_layer_index  : int
+    """
+    pass
+
+class SelectCellParam(Fact):
+    """
+    Fields:
+        layer_index         : int
+        source_layer_index  : int
+    """
+    pass
+
+class BmmParam(Fact):
+    """
+    Fields:
+        layer_index         : int
+        source_layer_index  : int
+    """
+    pass
+
+class StackParam(Fact):
+    """
+    Fields:
+        layer_index         : int
+        source_layer_index  : int
+        dim                 : int
+    """
+    pass
+
+class SplitParam(Fact):
+    """
+    Fields:
+        layer_index             : int
+        split_size_or_sections  : int
+        dim                     : int
+    """
+    pass
+
+class ReshapeParam(Fact):
+    """
+    Fields:
+        layer_index         : int
+        shape               : str
+    """
+    pass
+
 
 # =====================================================
 # COMPUTED SHAPE FACTS
@@ -291,5 +341,13 @@ class LayerCode(Fact):
         layer_index     : int
         init_code       : str   (code for __init__, e.g. 'self.lstm = nn.LSTM(...)')
         forward_code    : str   (code for forward(), e.g. 'x, (h, c) = self.lstm(x)')
+    """
+    pass
+class AutoUnpackCode(Fact):
+    """
+    Stores injected code when a layer auto-unpacks a PackedSequence.
+    Fields:
+        layer_index     : int
+        code            : str
     """
     pass

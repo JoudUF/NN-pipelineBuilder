@@ -6,6 +6,8 @@ from lstm.facts import (
     Conv1dParam, Pool1dParam, AdaptivePool1dParam, AttentionParam,
     DropoutParam, ActivationParam, PermuteParam, SqueezeParam,
     UnsqueezeParam, CatParam, ResidualParam,
+    SelectHiddenParam, SelectCellParam, BmmParam, StackParam,
+    SplitParam, ReshapeParam,                                
 )
 
 
@@ -39,6 +41,233 @@ class ShapeRules(KnowledgeEngine):
             d1=b,
             d2=edim,
             format="seq_batch_feat"
+        ))
+
+    # =====================================================
+    # SC_SUM_DIRECTIONS
+    # Output: [seq, batch, hidden]
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="sum_directions"),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d0=MATCH.d0, d1=MATCH.d1, d2=MATCH.d2, format=MATCH.fmt),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_sum_directions(self, i, d0, d1, d2, fmt):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=3,
+            d0=d0,
+            d1=d1,
+            d2=d2 // 2,
+            format=fmt
+        ))
+
+    # =====================================================
+    # SC_SPLIT_DIRECTIONS
+    # Output: [seq, batch, 2, hidden] (dims=4, but we don't have a 4D shape yet so we will just output 4 dims in d0, d1, d2, d3? Wait, LayerOutputShape has dims, d0, d1, d2. Let's just output [seq, batch, hidden] to keep pipeline simple, simulating keeping one direction or something. Actually, let's output a 3D tensor representing [seq*2, batch, hidden] or just [seq, batch, hidden]. Since the plan says output 4D but our fact doesn't have d3. Let's add d3 to the shape fact or just output 3D: [seq, batch, hidden])
+    # The plan says "outputs [seq, batch, 2, hidden] (dims=4)". Let's check `LayerOutputShape` definition.
+    # We will reshape it to [seq, batch, 2, hidden]. Since d3 doesn't exist, let's use [seq, batch, hidden] as a simplification (e.g., getting forward direction) or if we want to add d3 we have to edit facts.py. I'll edit facts.py to support d3 just in case, or just set dims=4 and not use d3. For simplicity, we output dims=4 and d0=seq, d1=batch, d2=2. 
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="split_directions"),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d0=MATCH.d0, d1=MATCH.d1, d2=MATCH.d2, format=MATCH.fmt),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_split_directions(self, i, d0, d1, d2, fmt):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=4,
+            d0=d0,
+            d1=d1,
+            d2=2,
+            format="seq_batch_dir_feat"
+        ))
+
+    # =====================================================
+    # SC_SELECT_HIDDEN
+    # Output: [batch, hidden]
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="select_hidden"),
+        SelectHiddenParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        LayerOutputShape(layer_index=MATCH.src, dims=3, d1=MATCH.b, d2=MATCH.h),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_select_hidden(self, i, b, h):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=2,
+            d0=b,
+            d1=h,
+            d2=-1,
+            format="batch_feat"
+        ))
+
+    # =====================================================
+    # SC_SELECT_CELL
+    # Output: [batch, hidden]
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="select_cell"),
+        SelectCellParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        LayerOutputShape(layer_index=MATCH.src, dims=3, d1=MATCH.b, d2=MATCH.h),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_select_cell(self, i, b, h):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=2,
+            d0=b,
+            d1=h,
+            d2=-1,
+            format="batch_feat"
+        ))
+
+    # =====================================================
+    # SC_MEAN_POOL
+    # Output: [batch, feat]
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="mean_pool"),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d1=MATCH.b, d2=MATCH.f, format="seq_batch_feat"),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_mean_pool(self, i, b, f):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=2,
+            d0=b,
+            d1=f,
+            d2=-1,
+            format="batch_feat"
+        ))
+
+    # =====================================================
+    # SC_MAX_POOL_TIME
+    # Output: [batch, feat]
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="max_pool_time"),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d1=MATCH.b, d2=MATCH.f, format="seq_batch_feat"),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_max_pool_time(self, i, b, f):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=2,
+            d0=b,
+            d1=f,
+            d2=-1,
+            format="batch_feat"
+        ))
+
+    # =====================================================
+    # SC_BMM
+    # Input: [b, n, m], Source: [b, m, p] -> Output: [b, n, p]
+    # Assuming batch_chan_seq or similar 3D
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="bmm"),
+        BmmParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d0=MATCH.b, d1=MATCH.n, d2=MATCH.m),
+        LayerOutputShape(layer_index=MATCH.src, dims=3, d0=MATCH.b2, d1=MATCH.m2, d2=MATCH.p),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_bmm(self, i, b, n, p):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=3,
+            d0=b,
+            d1=n,
+            d2=p,
+            format="bmm_out"
+        ))
+
+    # =====================================================
+    # SC_STACK
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="stack"),
+        StackParam(layer_index=MATCH.i, source_layer_index=MATCH.src, dim=MATCH.d),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=MATCH.dims, d0=MATCH.d0, d1=MATCH.d1, d2=MATCH.d2),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_stack(self, i, dims, d0, d1, d2):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=dims + 1,
+            d0=2,  # we stack 2 tensors usually, but this is a rough approximation
+            d1=d0,
+            d2=d1,
+            format="stacked"
+        ))
+
+    # =====================================================
+    # SC_SPLIT
+    # Output: Same shape but the split dimension is divided
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="split"),
+        SplitParam(layer_index=MATCH.i, split_size_or_sections=MATCH.sz, dim=MATCH.d),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=MATCH.dims, d0=MATCH.d0, d1=MATCH.d1, d2=MATCH.d2, format=MATCH.fmt),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_split(self, i, sz, d, dims, d0, d1, d2, fmt):
+        nd0, nd1, nd2 = d0, d1, d2
+        if d == 0 or d == -dims: nd0 = sz
+        elif d == 1 or d == -(dims-1): nd1 = sz
+        elif d == 2 or d == -(dims-2): nd2 = sz
+        
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=dims,
+            d0=nd0,
+            d1=nd1,
+            d2=nd2,
+            format=fmt
+        ))
+
+    # =====================================================
+    # SC_RESHAPE
+    # Output: Shape parsed from the string
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="reshape"),
+        ReshapeParam(layer_index=MATCH.i, shape=MATCH.shape_str),
+        LayerOutputShape(layer_index=MATCH.prev_i),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_reshape(self, i, shape_str):
+        parts = [p.strip() for p in shape_str.split(",")]
+        dims = len(parts)
+        d0 = int(parts[0]) if dims > 0 else -1
+        d1 = int(parts[1]) if dims > 1 else -1
+        d2 = int(parts[2]) if dims > 2 else -1
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=dims,
+            d0=d0,
+            d1=d1,
+            d2=d2,
+            format="reshaped"
         ))
 
     # =====================================================
@@ -728,8 +957,7 @@ class ShapeRules(KnowledgeEngine):
     @Rule(
         LayerNode(index=MATCH.i, layer_type="pack_sequence"),
         LayerOutputShape(layer_index=MATCH.prev_i, dims=3,
-                          d0=MATCH.d0, d1=MATCH.d1, d2=MATCH.d2,
-                          format="seq_batch_feat"),
+                          d0=MATCH.d0, d1=MATCH.d1, d2=MATCH.d2),
         TEST(lambda i, prev_i: i == prev_i + 1),
         NOT(LayerOutputShape(layer_index=MATCH.i)),
         salience=10
@@ -767,6 +995,20 @@ class ShapeRules(KnowledgeEngine):
             d2=d2,
             format="seq_batch_feat"
         ))
+
+    # =====================================================
+    # SC_AUTO_UNPACK_OUTPUT: Auto-unpack format propagation
+    # =====================================================
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type=MATCH.ltype),
+        TEST(lambda ltype: ltype not in ("lstm", "gru", "rnn", "unpack_sequence", "pack_sequence")),
+        LayerOutputShape(layer_index=MATCH.prev_i, format="packed"),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        AS.shape << LayerOutputShape(layer_index=MATCH.i, format="packed"),
+        salience=100
+    )
+    def sc_auto_unpack_output(self, shape):
+        self.modify(shape, format="seq_batch_feat")
 
     # =====================================================
     # SC_LSTM_PACKED: nn.LSTM with packed input
@@ -880,3 +1122,135 @@ class ShapeRules(KnowledgeEngine):
             d2=-1,
             format=fmt
         ))
+
+    # =====================================================
+    # NEW RULES
+    # =====================================================
+
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="split_directions"),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d0=MATCH.d0, d1=MATCH.d1, d2=MATCH.d2, format=MATCH.fmt),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_split_directions(self, i, d0, d1, d2, fmt):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=4,
+            d0=d0,
+            d1=d1,
+            d2=2,
+            d3=d2 // 2 if d2 != -1 else -1,
+            format="seq_batch_dir_hidden"
+        ))
+
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="select_hidden"),
+        SelectHiddenParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        LayerOutputShape(layer_index=MATCH.src, dims=3, d1=MATCH.batch, d2=MATCH.hidden),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_select_hidden(self, i, batch, hidden):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=2,
+            d0=batch,
+            d1=hidden,
+            d2=-1,
+            format="batch_feat"
+        ))
+
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="select_cell"),
+        SelectCellParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        LayerOutputShape(layer_index=MATCH.src, dims=3, d1=MATCH.batch, d2=MATCH.hidden),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_select_cell(self, i, batch, hidden):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=2,
+            d0=batch,
+            d1=hidden,
+            d2=-1,
+            format="batch_feat"
+        ))
+
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="mean_pool"),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d1=MATCH.batch, d2=MATCH.hidden),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_mean_pool(self, i, batch, hidden):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=2,
+            d0=batch,
+            d1=hidden,
+            d2=-1,
+            format="batch_feat"
+        ))
+
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="max_pool_time"),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d1=MATCH.batch, d2=MATCH.hidden),
+        TEST(lambda i, prev_i: i == prev_i + 1),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_max_pool_time(self, i, batch, hidden):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=2,
+            d0=batch,
+            d1=hidden,
+            d2=-1,
+            format="batch_feat"
+        ))
+
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="bmm"),
+        BmmParam(layer_index=MATCH.i, source_layer_index=MATCH.src),
+        LayerOutputShape(layer_index=MATCH.prev_i, dims=3, d0=MATCH.b1, d1=MATCH.n, d2=MATCH.m),
+        LayerOutputShape(layer_index=MATCH.src, dims=3, d0=MATCH.b2, d1=MATCH.m2, d2=MATCH.p),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_bmm(self, i, b1, n, m, b2, m2, p):
+        self.declare(LayerOutputShape(
+            layer_index=i,
+            dims=3,
+            d0=b1,
+            d1=n,
+            d2=p,
+            format="batch_seq_feat"
+        ))
+
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="stack"),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_stack_fallback(self, i):
+        self.declare(LayerOutputShape(layer_index=i, dims=3, d0=-1, d1=-1, d2=-1, format="stacked"))
+
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="split"),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_split_fallback(self, i):
+        self.declare(LayerOutputShape(layer_index=i, dims=3, d0=-1, d1=-1, d2=-1, format="split"))
+
+    @Rule(
+        LayerNode(index=MATCH.i, layer_type="reshape"),
+        NOT(LayerOutputShape(layer_index=MATCH.i)),
+        salience=10
+    )
+    def sc_reshape_fallback(self, i):
+        self.declare(LayerOutputShape(layer_index=i, dims=2, d0=-1, d1=-1, d2=-1, format="reshaped"))

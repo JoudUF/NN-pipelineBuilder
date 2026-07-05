@@ -5,6 +5,8 @@ from lstm.facts import (
     DropoutParam, ActivationParam, PermuteParam, SqueezeParam,
     UnsqueezeParam, CatParam, ResidualParam,
     Mismatch, FixRecommendation, LayerCode,
+    SelectHiddenParam, SelectCellParam, BmmParam, StackParam,
+    SplitParam, ReshapeParam,                                
 )
 from lstm.layer_config import ACTIVATION_TYPES, NO_PARAM_LAYERS
 
@@ -31,6 +33,12 @@ PARAM_FACT_MAP = {
     "unsqueeze":          UnsqueezeParam,
     "residual_add":       ResidualParam,
     "cat":                CatParam,
+    "select_hidden":      SelectHiddenParam,
+    "select_cell":        SelectCellParam,  
+    "bmm":                BmmParam,         
+    "stack":              StackParam,       
+    "split":              SplitParam,       
+    "reshape":            ReshapeParam,     
 }
 
 
@@ -214,6 +222,7 @@ class LSTMPipelineEngine:
 
         # --- Phase C: Run code generation engine ---
         self.layer_codes = []
+        self.auto_unpack_codes = {}
         try:
             from lstm.rules_code import CodeRules
             code_engine = CodeRules()
@@ -225,8 +234,11 @@ class LSTMPipelineEngine:
             code_engine.run()
 
             for f in code_engine.facts.values():
+                from lstm.facts import LayerCode, AutoUnpackCode
                 if isinstance(f, LayerCode):
                     self.layer_codes.append(f)
+                elif isinstance(f, AutoUnpackCode):
+                    self.auto_unpack_codes[f.get("layer_index")] = f
         except ImportError:
             # rules_code.py not yet created
             pass
@@ -284,12 +296,17 @@ class LSTMPipelineEngine:
         forward_lines = []
 
         for code_fact in sorted_codes:
+            idx = code_fact.get("layer_index")
+            if idx in self.auto_unpack_codes:
+                forward_lines.append("        " + self.auto_unpack_codes[idx].get("code"))
+            
             init_code = code_fact.get("init_code", "")
             forward_code = code_fact.get("forward_code", "")
             if init_code:
                 init_lines.append("        " + init_code)
             if forward_code:
                 forward_lines.append("        " + forward_code)
+                forward_lines.append("        out_{} = x".format(idx))
 
         code = "import torch\n"
         code += "import torch.nn as nn\n"
@@ -303,7 +320,7 @@ class LSTMPipelineEngine:
         else:
             code += "        pass\n"
         code += "\n"
-        code += "    def forward(self, x):\n"
+        code += "    def forward(self, x, lengths=None):\n"
         if forward_lines:
             code += "\n".join(forward_lines) + "\n"
         else:

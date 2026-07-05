@@ -191,9 +191,14 @@ def launch_lstm_builder():
     pipeline_canvas.pack(side="left", fill="both", expand=True, padx=5, pady=5)
     pipeline_scrollbar.pack(side="right", fill="y")
 
-    # Enable mousewheel scrolling
+    # Enable mousewheel scrolling only when hovering over the canvas
     def _on_mousewheel(event):
-        pipeline_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        try:
+            widget = window.winfo_containing(event.x_root, event.y_root)
+            if widget and str(widget).startswith(str(pipeline_canvas)):
+                pipeline_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
 
     pipeline_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
@@ -484,7 +489,7 @@ def launch_lstm_builder():
                                       font=("Consolas", 9), anchor="w")
                 lbl_shape.pack(fill="x", padx=8, pady=(0, 1))
             else:
-                lbl_shape = tk.Label(card, text="Output: (computing...)",
+                lbl_shape = tk.Label(card, text="Output: N/A (Invalid Shape)",
                                       bg=BG_CARD, fg=FG_DIM,
                                       font=("Consolas", 9), anchor="w")
                 lbl_shape.pack(fill="x", padx=8, pady=(0, 1))
@@ -583,7 +588,7 @@ def _get_param_summary(engine, layer_index, layer_type):
 
         # Recurrent layers
         elif layer_type in ("lstm", "gru", "rnn"):
-            parts.append(str(param.get("hidden_size", "?")))
+            parts.append("h=" + str(param.get("hidden_size", "?")))
             nl = param.get("num_layers", 1)
             if nl > 1:
                 parts.append("layers={}".format(nl))

@@ -29,6 +29,8 @@ LAYER_CATEGORIES = {
         "avgpool1d",
         "adaptive_avgpool1d",
         "adaptive_maxpool1d",
+        "mean_pool",        
+        "max_pool_time",    
     ],
     "Attention": [
         "multihead_attention",
@@ -46,10 +48,22 @@ LAYER_CATEGORIES = {
         "squeeze",
         "unsqueeze",
         "slice_last",
+        "split",            
+        "reshape",          
     ],
     "Combine Operations": [
         "residual_add",
         "cat",
+        "bmm",              
+        "stack",            
+    ],
+    "Recurrent State Extraction": [
+        "select_hidden",
+        "select_cell",
+    ],
+    "Direction Operations": [     
+        "sum_directions",
+        "split_directions",
     ],
     "Activations": [
         "relu",
@@ -94,6 +108,16 @@ LAYER_DISPLAY_NAMES = {
     "sigmoid":              "nn.Sigmoid",
     "softmax":              "nn.Softmax",
     "log_softmax":          "nn.LogSoftmax",
+    "sum_directions":       "Sum Directions (fwd+bwd)",
+    "split_directions":     "Split Directions",
+    "select_hidden":        "Select Hidden State (h_n)",
+    "select_cell":          "Select Cell State (c_n)",
+    "mean_pool":            "Mean Pool (over time)",
+    "max_pool_time":        "Max Pool (over time)",
+    "bmm":                  "torch.bmm (Batch Matmul)",
+    "stack":                "torch.stack",
+    "split":                "torch.split / chunk",
+    "reshape":              "torch.reshape / view",
 }
 
 # =====================================================
@@ -200,6 +224,26 @@ LAYER_PARAMS = {
         {"name": "source_layer_index", "label": "Source Layer Index", "type": "int", "default": None},
         {"name": "concat_dim",         "label": "Concat Dimension",  "type": "int", "default": -1},
     ],
+    "select_hidden": [
+        {"name": "source_layer_index", "label": "Source Layer Index (LSTM/GRU)", "type": "int", "default": None},
+    ],
+    "select_cell": [
+        {"name": "source_layer_index", "label": "Source Layer Index (LSTM)", "type": "int", "default": None},
+    ],
+    "bmm": [
+        {"name": "source_layer_index", "label": "Source Layer Index (2nd tensor)", "type": "int", "default": None},
+    ],
+    "stack": [
+        {"name": "source_layer_index", "label": "Source Layer Index", "type": "int", "default": None},
+        {"name": "dim",                "label": "Stack Dimension",    "type": "int", "default": 0},
+    ],
+    "split": [
+        {"name": "split_size_or_sections", "label": "Split Size", "type": "int", "default": None},
+        {"name": "dim",                    "label": "Dimension",  "type": "int", "default": 0},
+    ],
+    "reshape": [
+        {"name": "shape", "label": "Shape (e.g. -1, 128)", "type": "str", "default": None},
+    ],
 
     # --- Activations ---
     "relu":        [],
@@ -236,4 +280,6 @@ NO_PARAM_LAYERS = {
     "pack_sequence", "unpack_sequence",
     "layernorm", "batchnorm1d",
     "flatten", "slice_last",
+    "sum_directions", "split_directions",
+    "mean_pool", "max_pool_time",
 }
