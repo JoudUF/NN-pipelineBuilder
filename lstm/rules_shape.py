@@ -427,7 +427,7 @@ class ShapeRules(KnowledgeEngine):
                    bidirectional=MATCH.bidir),
         LayerOutputShape(layer_index=MATCH.prev_i, dims=3,
                           d0=MATCH.d0, d1=MATCH.d1,
-                          format=MATCH.fmt),
+                          format="seq_batch_feat"),
         TEST(lambda i, prev_i: i == prev_i + 1),
         NOT(LayerOutputShape(layer_index=MATCH.i)),
         salience=10
@@ -454,7 +454,7 @@ class ShapeRules(KnowledgeEngine):
                   bidirectional=MATCH.bidir),
         LayerOutputShape(layer_index=MATCH.prev_i, dims=3,
                           d0=MATCH.d0, d1=MATCH.d1,
-                          format=MATCH.fmt),
+                          format="seq_batch_feat"),
         TEST(lambda i, prev_i: i == prev_i + 1),
         NOT(LayerOutputShape(layer_index=MATCH.i)),
         salience=10
@@ -481,7 +481,7 @@ class ShapeRules(KnowledgeEngine):
                   bidirectional=MATCH.bidir),
         LayerOutputShape(layer_index=MATCH.prev_i, dims=3,
                           d0=MATCH.d0, d1=MATCH.d1,
-                          format=MATCH.fmt),
+                          format="seq_batch_feat"),
         TEST(lambda i, prev_i: i == prev_i + 1),
         NOT(LayerOutputShape(layer_index=MATCH.i)),
         salience=10
